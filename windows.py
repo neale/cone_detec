@@ -3,6 +3,7 @@ import cv2
 import pickle
 import time
 import os
+from operator import itemgetter
 import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
 from sklearn.model_selection import train_test_split
@@ -165,11 +166,74 @@ def draw_labeled_bboxes(img, labels):
 
 def narrow_windows(img, heatmap, windows):
     # each tuple in the heatmap is a window. We want to grab the original windows that correspond to the heat map
+    import sys
+    print (heatmap.shape, np.min(heatmap), np.max(heatmap))
+    refined_windows = []
     for bbox in windows:
-        cv2.rectangle(np.copy(img), bbox[0], bbox[1], (0, 0, 255), 6)
-        plt.imshow(img)
-        plt.show()
-        
+        new_im = np.copy(img)
+        centerx = bbox[1][0] - int((bbox[1][0] - bbox[0][0])/2)
+        centery = bbox[1][1] - int((bbox[1][1] - bbox[0][1])/2)
+        if heatmap[centery][centerx] > 0:
+            refined_windows.append(bbox)
+    
+    windows_x = sorted(refined_windows, key=lambda x: x[1][0])
+    runner = []
+    final_x = []
+    # init from first box
+    cx = windows_x[0][1][0] - int((windows[0][1][0] - windows[0][0][0])/2)
+    cy = windows_x[0][1][1] - int((windows[0][1][1] - windows[0][0][1])/2)
+    center = np.array([cx, cy])
+    for window in windows_x:
+        cx = window[1][0] - int((window[1][0] - window[0][0])/2)
+        cy = window[1][1] - int((window[1][1] - window[0][1])/2)
+        new_center = np.array([cx, cy])
+        dist = np.abs(np.linalg.norm(center - new_center))
+
+        if dist < 20:
+            runner.append(new_center)
+        if dist > 50:
+            # new center, now take average of running average
+            center = new_center
+            if len(runner) > 1:
+                x, y = zip(*runner)
+                l = len(x)
+                centroid = (np.sum(x)/l, np.sum(y)/l)
+                top_left = (centroid[0]-25, centroid[1]-25)
+                top_right = (centroid[0]+25, centroid[1]+25)
+                bbox = (top_left, top_right)
+                runner = []
+                runner.append(center)
+                final_x.append(bbox)
+            else:
+                final_x.append(window)
+            
+
+    """
+    windows_y = sorted(refined_windows, key=lambda x: x[1][1])
+    runner = []
+    final_y = []
+    # init from first box
+    cx = windows_x[0][1][0] - int((windows[0][1][0] - windows[0][0][0])/2)
+    cy = windows_x[0][1][1] - int((windows[0][1][1] - windows[0][0][1])/2)
+    center = np.array([cx, cy])
+    for window in windows_x:
+        cx = windows_x[1][0] - int((windows[1][0] - windows[0][0])/2)
+        cy = windows_x[1][1] - int((windows[1][1] - windows[0][1])/2)
+        new_center = np.array([cx, cy])
+        dist = np.abs(np.linalg.norm(center - new_center))
+
+        if dist < 20:
+            runner.append(new_center)
+        if dist > 50:
+            # new center, now take average of running average
+            center = new_center
+            x, y = zip(*runner)
+            l = len(x)
+            centroid = (np.sum(x)/l, np.sum(y)/l)
+            runner = []
+            runner.append(center)
+    """
+    return final_x
 
 
 if __name__ == '__main__':
@@ -199,13 +263,16 @@ if __name__ == '__main__':
 
     # Display predictions on all test_images
     imdir = 'test_images'
+    plt.ion()
+    fig = plt.figure()
     for image_file in os.listdir(imdir):
+        plt.clf()
         image = mpimg.imread(os.path.join(imdir, image_file))
         draw_image = np.copy(image)
 
-        windows = slide_window(image, x_start_stop=(50, 1100), y_start_stop=(100, 500),
+        windows = slide_window(image, x_start_stop=(50, 1100), y_start_stop=(100, 450),
                 xy_window=(128, 128), xy_overlap=(pct_overlap, pct_overlap))
-        windows = slide_window(image, x_start_stop=(50, 1100), y_start_stop=(100, 500),
+        windows = slide_window(image, x_start_stop=(50, 1100), y_start_stop=(100, 450),
                 xy_window=(96, 96), xy_overlap=(pct_overlap, pct_overlap))
 
         hot_windows = search_windows(image, windows, svc, X_scaler, color_space=color_space,
@@ -216,23 +283,24 @@ if __name__ == '__main__':
                 hist_feat=hist_feat, hog_feat=hog_feat)
         window_img = draw_boxes(draw_image, hot_windows, color=(0, 0, 255), thick=6)
 
-        plt.imshow(window_img)
-        plt.show()
+        #plt.imshow(window_img)
+        #plt.show()
 
         # Calculate and draw heat map
         heatmap = np.zeros((720, 1280))  # NOTE: Image dimensions hard-coded
         heatmap = add_heat(heatmap, hot_windows)
         heatmap = apply_threshold(heatmap, heatmap_thresh)
-        plt.imshow(heatmap)
-        new_map = narrow_windows(np.copy(image), heatmap, hot_windows)
-        print (hot_windows)
-        plt.show()
-        #print(labels[1], 'cones found')
-        #plt.imshow(labels[0], cmap='gray')
+        #plt.imshow(heatmap)
         #plt.show()
 
-        # Draw final bounding boxes
-        draw_img = draw_labeled_bboxes(np.copy(image), labels)
-        #draw_img = draw_boxes(np.copy(image), labels)
-        plt.imshow(draw_img)
-        plt.show()
+        img = np.copy(image)
+        new_map = narrow_windows(np.copy(image), heatmap, hot_windows)
+        window_img = draw_boxes(img, new_map, color=(0, 0, 255), thick=6)
+        plt.imshow(window_img)
+        fig.canvas.draw()
+        time.sleep(1e-5)
+        #plt.show()
+
+
+        #print(labels[1], 'cones found')
+
